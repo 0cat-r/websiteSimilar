@@ -29,10 +29,11 @@ jobs:
           echo "GOBIN=${RUNNER_TEMP}/bin" >> "$GITHUB_ENV"
           echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
 
-      - name: "Install garble (Go ${{ matrix.go-version || '1.23' }})"
+      # NOTE: pin garble to a version compatible with Go 1.23.
+      - name: "Install garble"
         run: |
           go env
-          go install mvdan.cc/garble@latest
+          go install mvdan.cc/garble@v0.12.1
           which garble
           garble -h >/dev/null
           
