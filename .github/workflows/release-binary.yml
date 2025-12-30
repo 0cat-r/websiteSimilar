@@ -16,16 +16,19 @@ jobs:
           fetch-depth: 0
 
       - name: "Set up Go"
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with: 
-          go-version: 1.21.x
+          go-version: '1.23'
+          cache: false
+
+      - name: "Install garble"
+        run: go install mvdan.cc/garble@latest
           
       - name: "Create release on GitHub"
-        uses: goreleaser/goreleaser-action@v4
+        uses: goreleaser/goreleaser-action@v5
         with: 
           args: "release --clean"
-          version: latest
+          version: v2.12.7
           workdir: .
-          
         env: 
           GITHUB_TOKEN: "${{ secrets.GO_BUILD_TOKEN }}"
