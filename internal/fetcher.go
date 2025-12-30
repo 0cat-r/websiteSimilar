@@ -111,19 +111,27 @@ func (f *Fetcher) Fetch(ctx context.Context, item URLItem) FetchResult {
 	result.ContentType = resp.Header.Get("Content-Type")
 	result.ContentLength = resp.ContentLength
 
-	// 如果是 HTML，读取 body
-	if isHTML(resp.Header.Get("Content-Type")) {
-		// 限制读取大小
-		limitReader := io.LimitReader(resp.Body, MaxHTMLSize)
-		body, err := io.ReadAll(limitReader)
-		if err != nil {
-			result.Error = fmt.Sprintf("读取响应体失败: %v", err)
-			return result
-		}
+	// 读取 body（所有类型都读取，以支持非 HTML 内容的相似性检测）
+	limitReader := io.LimitReader(resp.Body, MaxHTMLSize)
+	body, err := io.ReadAll(limitReader)
+	if err != nil {
+		result.Error = fmt.Sprintf("读取响应体失败: %v", err)
+		return result
+	}
+	result.ContentLength = int64(len(body))
+
+	// 根据 Content-Type 分类处理
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	result.ContentCategory = categorizeContent(contentType)
+
+	switch result.ContentCategory {
+	case ContentCategoryHTML:
 		result.RawHTML = body
-		result.ContentLength = int64(len(body))
-		// 提取标题
 		result.Title = extractTitle(body)
+	case ContentCategoryText, ContentCategoryImage, ContentCategoryBinary:
+		result.RawBody = body
+	default:
+		result.ContentCategory = ContentCategoryEmpty
 	}
 
 	return result
@@ -180,6 +188,39 @@ func isHTML(contentType string) bool {
 	return strings.Contains(strings.ToLower(contentType), "text/html")
 }
 
+// categorizeContent 根据 Content-Type 分类内容类型
+func categorizeContent(contentType string) ContentCategory {
+	ct := strings.ToLower(contentType)
+
+	// HTML
+	if strings.Contains(ct, "text/html") {
+		return ContentCategoryHTML
+	}
+
+	// 文本类（JSON, XML, 纯文本等）
+	if strings.Contains(ct, "application/json") ||
+		strings.Contains(ct, "application/xml") ||
+		strings.Contains(ct, "text/xml") ||
+		strings.Contains(ct, "text/plain") ||
+		strings.Contains(ct, "text/css") ||
+		strings.Contains(ct, "text/javascript") ||
+		strings.Contains(ct, "application/javascript") {
+		return ContentCategoryText
+	}
+
+	// 图片
+	if strings.Contains(ct, "image/") {
+		return ContentCategoryImage
+	}
+
+	// 其他有内容的响应归为二进制
+	if ct != "" {
+		return ContentCategoryBinary
+	}
+
+	return ContentCategoryEmpty
+}
+
 // extractTitle 从 HTML 内容中提取标题
 func extractTitle(html []byte) string {
 	// 使用正则表达式提取 <title> 标签内容
@@ -198,23 +239,23 @@ func extractTitle(html []byte) string {
 func cleanTitleContent(title string) string {
 	// HTML 实体映射
 	entities := map[string]string{
-		"&amp;":  "&",
-		"&lt;":   "<",
-		"&gt;":   ">",
-		"&quot;": "\"",
-		"&#39;":  "'",
-		"&nbsp;": " ",
-		"&#160;": " ",
+		"&amp;":   "&",
+		"&lt;":    "<",
+		"&gt;":    ">",
+		"&quot;":  "\"",
+		"&#39;":   "'",
+		"&nbsp;":  " ",
+		"&#160;":  " ",
 		"&#8203;": "",
 	}
-	
+
 	for entity, replacement := range entities {
 		title = strings.ReplaceAll(title, entity, replacement)
 	}
-	
+
 	// 清理多余的空白字符
 	spaceRegex := regexp.MustCompile(`\s+`)
 	title = spaceRegex.ReplaceAllString(title, " ")
-	
+
 	return strings.TrimSpace(title)
 }

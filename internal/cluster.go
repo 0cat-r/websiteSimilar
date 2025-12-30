@@ -7,27 +7,50 @@ import (
 	"sort"
 )
 
-// quickSimHashCheck SimHash 预筛选
-// 快速排除明显不相似的页面，减少详细比较的次数
+// quickSimHashCheck 预筛选
+// 根据内容类型使用不同的快速筛选策略
 func quickSimHashCheck(a, b *PageFeatures) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	// SimHash 汉明距离太大直接跳过
-	simHashDist := hammingDistance64(a.TextSimHash, b.TextSimHash)
-	if simHashDist > QuickSimHashMaxDist {
+
+	// 不同类型的内容不能匹配
+	if a.Category != b.Category {
 		return false
 	}
-	// 文本长度差异超过 50% 也跳过
-	if a.TextLength == 0 || b.TextLength == 0 {
+
+	switch a.Category {
+	case ContentCategoryHTML, ContentCategoryText:
+		// HTML 和文本类：使用 SimHash 预筛选
+		simHashDist := hammingDistance64(a.TextSimHash, b.TextSimHash)
+		if simHashDist > QuickSimHashMaxDist {
+			return false
+		}
+		// 长度差异超过 50% 也跳过
+		if a.TextLength == 0 || b.TextLength == 0 {
+			return false
+		}
+		lenA, lenB := a.TextLength, b.TextLength
+		if lenA > lenB {
+			lenA, lenB = lenB, lenA
+		}
+		return float64(lenA)/float64(lenB) >= 0.5
+
+	case ContentCategoryImage:
+		// 图片：使用 pHash 预筛选
+		if a.PHash == 0 || b.PHash == 0 {
+			return false
+		}
+		pHashDist := hammingDistance64(a.PHash, b.PHash)
+		return pHashDist <= ImagePHashMaxDist+5 // 预筛选稍微宽松一点
+
+	case ContentCategoryBinary:
+		// 二进制：长度相同才可能匹配
+		return a.TextLength == b.TextLength
+
+	default:
 		return false
 	}
-	lenA, lenB := a.TextLength, b.TextLength
-	if lenA > lenB {
-		lenA, lenB = lenB, lenA
-	}
-	lengthRatio := float64(lenA) / float64(lenB)
-	return lengthRatio >= 0.5
 }
 
 // UnionFind 并查集
@@ -207,7 +230,7 @@ type ClusterGroup struct {
 }
 
 // generateBucketKey 生成粗桶 key
-// 用 host + SimHash 高16位 + 文本长度分桶，减少比较次数
+// 根据内容类型使用不同的分桶策略
 func generateBucketKey(page *PageWithFeatures) string {
 	// 提取 host
 	u, err := url.Parse(page.FinalURL)
@@ -219,14 +242,33 @@ func generateBucketKey(page *PageWithFeatures) string {
 		host = u.Host
 	}
 
-	// SimHash 的高 16 位
-	top16Bits := (page.Features.TextSimHash >> 48) & 0xFFFF
+	category := page.Features.Category
+	var key string
 
-	// 文本长度按 1000 分桶
-	lengthBucket := page.Features.TextLength / 1000
+	switch category {
+	case ContentCategoryHTML, ContentCategoryText:
+		// HTML 和文本类：host + 内容类型 + SimHash 高16位 + 文本长度分桶
+		top16Bits := (page.Features.TextSimHash >> 48) & 0xFFFF
+		lengthBucket := page.Features.TextLength / 1000
+		key = fmt.Sprintf("%s|%s|%d|%d", host, category, top16Bits, lengthBucket)
+
+	case ContentCategoryImage:
+		// 图片：host + 内容类型 + pHash 高16位 + 尺寸分桶
+		top16Bits := (page.Features.PHash >> 48) & 0xFFFF
+		// 按图片尺寸分桶（宽度/100 * 高度/100）
+		sizeBucket := (page.Features.ScreenshotW / 100) * (page.Features.ScreenshotH / 100)
+		key = fmt.Sprintf("%s|%s|%d|%d", host, category, top16Bits, sizeBucket)
+
+	case ContentCategoryBinary:
+		// 二进制：host + 内容类型 + 文件大小（精确匹配需要）
+		key = fmt.Sprintf("%s|%s|%d", host, category, page.Features.TextLength)
+
+	default:
+		// 默认
+		key = fmt.Sprintf("%s|%s|%d", host, category, page.Features.TextLength)
+	}
 
 	// 组合后 MD5 缩短
-	key := fmt.Sprintf("%s|%d|%d", host, top16Bits, lengthBucket)
 	hash := md5.Sum([]byte(key))
 	return fmt.Sprintf("%x", hash)
 }

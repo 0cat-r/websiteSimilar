@@ -2,8 +2,12 @@ package internal
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
 	"image/png"
 	"regexp"
 	"sort"
@@ -307,4 +311,84 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ExtractNonHTMLFeatures 提取非 HTML 内容的特征
+// 比 HTML 简单得多：文本类直接 SimHash，图片直接 pHash，其他用 MD5
+func ExtractNonHTMLFeatures(category ContentCategory, body []byte) *PageFeatures {
+	if len(body) == 0 {
+		return nil
+	}
+
+	features := &PageFeatures{
+		Category: category, // 设置内容类型，用于后续相似度判断
+	}
+
+	switch category {
+	case ContentCategoryText:
+		// 文本类内容（JSON, XML, 纯文本等）直接计算 SimHash
+		text := string(body)
+		cleaned := cleanText(text)
+		features.TextLength = utf8.RuneCountInString(cleaned)
+		features.TextSimHash = computeSimHash(cleaned)
+
+	case ContentCategoryImage:
+		// 图片直接计算 pHash
+		if err := parseImageFeatures(features, body); err != nil {
+			// 图片解析失败，降级到 MD5
+			features.TextSimHash = computeMD5Hash(body)
+			features.TextLength = len(body)
+			features.Category = ContentCategoryBinary // 降级为二进制处理
+		}
+
+	case ContentCategoryBinary:
+		// 二进制内容用 MD5 作为指纹（完全匹配）
+		features.TextSimHash = computeMD5Hash(body)
+		features.TextLength = len(body)
+
+	default:
+		return nil
+	}
+
+	return features
+}
+
+// parseImageFeatures 解析图片特征（支持多种格式）
+func parseImageFeatures(features *PageFeatures, imgData []byte) error {
+	if len(imgData) == 0 {
+		return fmt.Errorf("图片数据为空")
+	}
+
+	// 尝试解码图片（支持 PNG, JPEG, GIF）
+	img, format, err := image.Decode(bytes.NewReader(imgData))
+	if err != nil {
+		return fmt.Errorf("图片解码失败 (%s): %w", format, err)
+	}
+
+	// 记录尺寸
+	bounds := img.Bounds()
+	features.ScreenshotW = bounds.Dx()
+	features.ScreenshotH = bounds.Dy()
+
+	// 计算感知哈希
+	hash, err := goimagehash.PerceptionHash(img)
+	if err != nil {
+		return err
+	}
+
+	features.PHash = hash.GetHash()
+	features.TextLength = len(imgData) // 用文件大小作为 TextLength
+
+	return nil
+}
+
+// computeMD5Hash 计算 MD5 哈希，转换为 uint64（取前 8 字节）
+func computeMD5Hash(data []byte) uint64 {
+	hash := md5.Sum(data)
+	// 取前 8 字节转为 uint64
+	var result uint64
+	for i := 0; i < 8; i++ {
+		result = (result << 8) | uint64(hash[i])
+	}
+	return result
 }

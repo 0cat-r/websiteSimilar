@@ -20,11 +20,12 @@ func BuildReport(
 		URLs:     make([]URLReport, 0, len(fetchResults)),
 		Clusters: make([]ClusterInfo, 0, len(contentClusters)),
 		Meta: MetaInfo{
-			TotalURLs:        len(fetchResults),
-			EligibleHTMLURLs:  0,
-			TotalClusters:    len(contentClusters),
-			SimThreshold:     opts.SimThreshold,
-			GeneratedAt:      time.Now().Format(time.RFC3339),
+			TotalURLs:           len(fetchResults),
+			EligibleHTMLURLs:    0,
+			EligibleNonHTMLURLs: 0,
+			TotalClusters:       len(contentClusters),
+			SimThreshold:        opts.SimThreshold,
+			GeneratedAt:         time.Now().Format(time.RFC3339),
 		},
 	}
 
@@ -59,8 +60,9 @@ func BuildReport(
 		})
 	}
 
-	// 统计 eligible HTML URLs
-	eligibleCount := 0
+	// 统计 eligible URLs
+	eligibleHTMLCount := 0
+	eligibleNonHTMLCount := 0
 
 	// 构建 URL 报告
 	for _, fetchResult := range fetchResults {
@@ -82,7 +84,12 @@ func BuildReport(
 		// 1) 内容聚类优先（有 Features + 在 content cluster 里）
 		page, hasFeatures := pageMap[fetchResult.ID]
 		if hasFeatures && page.Features != nil {
-			eligibleCount++
+			// 分别统计 HTML 和非 HTML
+			if page.Features.Category == ContentCategoryHTML {
+				eligibleHTMLCount++
+			} else {
+				eligibleNonHTMLCount++
+			}
 
 			// 设置聚类信息
 			clusterID, inCluster := clusterByPageID[fetchResult.ID]
@@ -124,7 +131,8 @@ func BuildReport(
 		report.URLs = append(report.URLs, urlReport)
 	}
 
-	report.Meta.EligibleHTMLURLs = eligibleCount
+	report.Meta.EligibleHTMLURLs = eligibleHTMLCount
+	report.Meta.EligibleNonHTMLURLs = eligibleNonHTMLCount
 
 	return report
 }

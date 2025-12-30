@@ -70,6 +70,7 @@ func (r *Renderer) ExtractFeatures(ctx context.Context, finalURL string) (*PageF
 	defer func() { <-r.workerPool }()
 
 	features := &PageFeatures{
+		Category:  ContentCategoryHTML, // HTML 页面
 		TagCount:  make(map[string]int),
 		PathCount: make(map[string]int),
 	}

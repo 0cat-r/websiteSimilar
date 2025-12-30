@@ -110,7 +110,30 @@ func totalSim(contentSim, structSim, visualSim, behaviorSim float64) float64 {
 }
 
 // IsDuplicate 判断两个页面是否为重复页面
+// 根据内容类型使用不同的判断策略
 func IsDuplicate(a, b *PageFeatures) bool {
+	// 不同类型的内容不能判定为重复
+	if a.Category != b.Category {
+		return false
+	}
+
+	// 根据内容类型使用不同策略
+	switch a.Category {
+	case ContentCategoryHTML:
+		return isDuplicateHTML(a, b)
+	case ContentCategoryText:
+		return isDuplicateText(a, b)
+	case ContentCategoryImage:
+		return isDuplicateImage(a, b)
+	case ContentCategoryBinary:
+		return isDuplicateBinary(a, b)
+	default:
+		return false
+	}
+}
+
+// isDuplicateHTML HTML 页面的重复判断（原有逻辑）
+func isDuplicateHTML(a, b *PageFeatures) bool {
 	contentSim := simContent(a, b)
 	structureSim := simStructure(a, b)
 	visualSim := simVisual(a, b)
@@ -126,13 +149,87 @@ func IsDuplicate(a, b *PageFeatures) bool {
 	return false
 }
 
+// isDuplicateText 文本类内容的重复判断（JSON/XML/纯文本）
+// 只使用 SimHash 比较，简单高效
+func isDuplicateText(a, b *PageFeatures) bool {
+	// 长度差异太大直接跳过
+	if a.TextLength == 0 || b.TextLength == 0 {
+		return false
+	}
+	lenA, lenB := a.TextLength, b.TextLength
+	if lenA > lenB {
+		lenA, lenB = lenB, lenA
+	}
+	if float64(lenA)/float64(lenB) < 0.5 {
+		return false
+	}
+
+	// SimHash 汉明距离
+	dist := hammingDistance64(a.TextSimHash, b.TextSimHash)
+	return dist <= TextSimHashMaxDist
+}
+
+// isDuplicateImage 图片的重复判断
+// 使用 pHash 比较
+func isDuplicateImage(a, b *PageFeatures) bool {
+	if a.PHash == 0 || b.PHash == 0 {
+		return false
+	}
+
+	dist := hammingDistance64(a.PHash, b.PHash)
+	return dist <= ImagePHashMaxDist
+}
+
+// isDuplicateBinary 二进制内容的重复判断
+// 必须完全匹配（SimHash 相同）
+func isDuplicateBinary(a, b *PageFeatures) bool {
+	// 长度必须相同
+	if a.TextLength != b.TextLength {
+		return false
+	}
+	// MD5 指纹必须完全相同
+	return a.TextSimHash == b.TextSimHash
+}
+
 // CalculateSimilarities 计算所有维度的相似度
+// 根据内容类型返回有意义的相似度值
 func CalculateSimilarities(a, b *PageFeatures) (contentSim, structureSim, visualSim, behaviorSim, total float64) {
-	contentSim = simContent(a, b)
-	structureSim = simStructure(a, b)
-	visualSim = simVisual(a, b)
-	behaviorSim = simBehavior(a, b)
-	total = totalSim(contentSim, structureSim, visualSim, behaviorSim)
+	// 不同类型的内容，返回 0
+	if a.Category != b.Category {
+		return 0, 0, 0, 0, 0
+	}
+
+	switch a.Category {
+	case ContentCategoryHTML:
+		// HTML：完整计算所有维度
+		contentSim = simContent(a, b)
+		structureSim = simStructure(a, b)
+		visualSim = simVisual(a, b)
+		behaviorSim = simBehavior(a, b)
+		total = totalSim(contentSim, structureSim, visualSim, behaviorSim)
+
+	case ContentCategoryText:
+		// 文本类：只有 contentSim 有意义
+		contentSim = simContent(a, b)
+		total = contentSim
+
+	case ContentCategoryImage:
+		// 图片：只有 visualSim 有意义
+		visualSim = simVisual(a, b)
+		total = visualSim
+
+	case ContentCategoryBinary:
+		// 二进制：完全匹配时为 1，否则为 0
+		if a.TextSimHash == b.TextSimHash && a.TextLength == b.TextLength {
+			contentSim = 1.0
+			total = 1.0
+		}
+
+	default:
+		// 未知类型
+		return 0, 0, 0, 0, 0
+	}
+
 	return
 }
 

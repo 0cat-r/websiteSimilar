@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 )
 
@@ -68,21 +67,59 @@ func Run(ctx context.Context, opts Options) (*FullReport, error) {
 		batchFetchResults := fetcher.FetchBatch(ctx, batchItems, opts.Parallel)
 		logger.Info("HTTP 抓取完成，本批 %d 个结果", len(batchFetchResults))
 
-		var batchEligible []FetchResult
+		// 分类：HTML 需要渲染，非 HTML 直接提取特征
+		var batchEligibleHTML []FetchResult
+		var batchEligibleNonHTML []FetchResult
 		for _, fr := range batchFetchResults {
-			if isEligible(fr) {
-				batchEligible = append(batchEligible, fr)
+			if isEligibleHTML(fr) {
+				batchEligibleHTML = append(batchEligibleHTML, fr)
+			} else if isEligibleNonHTML(fr) {
+				batchEligibleNonHTML = append(batchEligibleNonHTML, fr)
 			}
 		}
-		logger.Info("可判定的 HTML 页面：%d/%d", len(batchEligible), len(batchFetchResults))
+		logger.Info("可判定页面：HTML %d 个，非 HTML %d 个（共 %d 个）",
+			len(batchEligibleHTML), len(batchEligibleNonHTML), len(batchFetchResults))
 
 		var mu sync.Mutex
+
+		// 先处理非 HTML（简单快速）
+		for _, fr := range batchEligibleNonHTML {
+			features := ExtractNonHTMLFeatures(fr.ContentCategory, fr.RawBody)
+			if features == nil {
+				continue
+			}
+
+			// 根据内容类型使用不同的最小阈值
+			eligible := false
+			switch fr.ContentCategory {
+			case ContentCategoryText:
+				// 文本类：使用字符数阈值
+				eligible = features.TextLength >= MinTextLength
+			case ContentCategoryImage:
+				// 图片：只要解析成功（有 pHash）就算有效
+				eligible = features.PHash != 0
+			case ContentCategoryBinary:
+				// 二进制：只要有内容就算有效
+				eligible = features.TextLength > 0
+			}
+
+			if eligible {
+				mu.Lock()
+				pagesWithFeatures = append(pagesWithFeatures, &PageWithFeatures{
+					FetchResult: fr,
+					Features:    features,
+				})
+				mu.Unlock()
+			}
+		}
+
 		var wg sync.WaitGroup
 		cancelled := false
 		titleUpdates := make(map[int]string)
 		var titleMu sync.Mutex
 
-		for idx, fr := range batchEligible {
+		// 处理 HTML 页面（需要渲染）
+		for idx, fr := range batchEligibleHTML {
 			select {
 			case <-ctx.Done():
 				logger.Warn("渲染被取消，跳过剩余任务")
@@ -146,8 +183,10 @@ func Run(ctx context.Context, opts Options) (*FullReport, error) {
 			logger.Info("本批渲染被取消，继续处理下一批")
 		}
 
+		// 清理原始内容，释放内存
 		for i := range batchFetchResults {
 			batchFetchResults[i].RawHTML = nil
+			batchFetchResults[i].RawBody = nil
 		}
 		fetchResults = append(fetchResults, batchFetchResults...)
 
@@ -176,19 +215,37 @@ func Run(ctx context.Context, opts Options) (*FullReport, error) {
 	return report, nil
 }
 
-// isEligible 判断是否为可判定的 HTML 页面
-func isEligible(result FetchResult) bool {
+// isEligibleHTML 判断是否为可判定的 HTML 页面
+func isEligibleHTML(result FetchResult) bool {
 	if result.StatusCode < 200 || result.StatusCode >= 300 {
 		return false
 	}
 
-	if !strings.Contains(strings.ToLower(result.ContentType), "text/html") {
+	if result.ContentCategory != ContentCategoryHTML {
 		return false
 	}
 
-	if len(result.RawHTML) < 1024 {
+	if len(result.RawHTML) < MinHTMLSize {
 		return false
 	}
 
 	return true
+}
+
+// isEligibleNonHTML 判断是否为可判定的非 HTML 内容
+func isEligibleNonHTML(result FetchResult) bool {
+	if result.StatusCode < 200 || result.StatusCode >= 300 {
+		return false
+	}
+
+	switch result.ContentCategory {
+	case ContentCategoryText:
+		return len(result.RawBody) >= MinTextSize
+	case ContentCategoryImage:
+		return len(result.RawBody) >= MinImageSize
+	case ContentCategoryBinary:
+		return len(result.RawBody) >= MinBinarySize
+	default:
+		return false
+	}
 }
