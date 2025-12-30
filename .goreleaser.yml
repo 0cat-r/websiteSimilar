@@ -9,9 +9,10 @@ before:
 builds:
 - env:
     - CGO_ENABLED=0
+    # Only obfuscate this module's packages; do NOT obfuscate stdlib/runtime internals.
+    - GOGARBLE=github.com/0cat/websiteSimilar/...
     - GARBLE_LINK_TINY=true
     - GARBLE_SEED=random
-    - GARBLE_DEBUGDIR=garble_out
   goos:
     - windows
     - linux
