@@ -23,10 +23,11 @@ jobs:
 
       # Force garble to be built by the same Go version as the release build.
       # This avoids picking up a preinstalled/cached garble built with an older Go.
-      - name: "Prepare local bin"
+      - name: "Prepare local bin (outside repo)"
         run: |
-          echo "GOBIN=${GITHUB_WORKSPACE}/.bin" >> "$GITHUB_ENV"
-          echo "${GITHUB_WORKSPACE}/.bin" >> "$GITHUB_PATH"
+          # Put binaries in RUNNER_TEMP to avoid making the git workspace dirty.
+          echo "GOBIN=${RUNNER_TEMP}/bin" >> "$GITHUB_ENV"
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
 
       - name: "Install garble (Go ${{ matrix.go-version || '1.23' }})"
         run: |
