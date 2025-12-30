@@ -21,8 +21,19 @@ jobs:
           go-version: '1.23'
           cache: false
 
-      - name: "Install garble"
-        run: go install mvdan.cc/garble@latest
+      # Force garble to be built by the same Go version as the release build.
+      # This avoids picking up a preinstalled/cached garble built with an older Go.
+      - name: "Prepare local bin"
+        run: |
+          echo "GOBIN=${GITHUB_WORKSPACE}/.bin" >> "$GITHUB_ENV"
+          echo "${GITHUB_WORKSPACE}/.bin" >> "$GITHUB_PATH"
+
+      - name: "Install garble (Go ${{ matrix.go-version || '1.23' }})"
+        run: |
+          go env
+          go install mvdan.cc/garble@latest
+          which garble
+          garble -h >/dev/null
           
       - name: "Create release on GitHub"
         uses: goreleaser/goreleaser-action@v5
