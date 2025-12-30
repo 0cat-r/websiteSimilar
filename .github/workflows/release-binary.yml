@@ -33,7 +33,7 @@ jobs:
       - name: "Install garble"
         run: |
           go env
-          go install mvdan.cc/garble@v0.12.1
+          go install mvdan.cc/garble@v0.14.2
           which garble
           garble version
           
