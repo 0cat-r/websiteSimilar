@@ -35,7 +35,7 @@ jobs:
           go env
           go install mvdan.cc/garble@v0.12.1
           which garble
-          garble -h >/dev/null
+          garble version
           
       - name: "Create release on GitHub"
         uses: goreleaser/goreleaser-action@v5
