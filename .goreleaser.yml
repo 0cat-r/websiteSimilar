@@ -2,7 +2,7 @@ project_name: websiteSimilar
 
 before:
   hooks:
-    - go install mvdan.cc/garble@v0.12.1
+    - go install mvdan.cc/garble@latest
     - go mod download
     - go mod tidy
     
